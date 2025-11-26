@@ -48,7 +48,7 @@ const App: React.FC = () => {
     if (showToast.visible) {
       const timer = setTimeout(() => {
         setShowToast({ ...showToast, visible: false });
-      }, 4000); // Increased duration to ensure user sees it
+      }, 3000);
       return () => clearTimeout(timer);
     }
   }, [showToast.visible]);
@@ -108,38 +108,26 @@ const App: React.FC = () => {
   const generateCardImage = async (): Promise<Blob | null> => {
     if (!cardRef.current) return null;
     
-    // Ensure fonts are loaded before capture
-    await document.fonts.ready;
-    
-    // Slight delay to ensure DOM is stable
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
     try {
-      // Dynamic scale: High DPI screens (iPhone) crash with scale 3 or 4.
-      // We cap it at 2 which is sufficient for Retina displays.
+      // Ensure fonts are loaded
+      await document.fonts.ready;
+      
+      // Dynamic scale logic
       const pixelRatio = window.devicePixelRatio || 1;
-      const safeScale = pixelRatio > 2 ? 2 : pixelRatio;
+      const safeScale = pixelRatio > 2 ? 2 : pixelRatio; // Cap at 2x for iOS stability
 
       const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: '#0F2027', // Dark background for no transparency
+        backgroundColor: '#0F2027', 
         scale: safeScale,
         useCORS: true,
-        allowTaint: false, // CRITICAL FIX FOR IOS: Must be FALSE
+        allowTaint: false, // CRITICAL: Must be false for iOS export
         logging: false,
         ignoreElements: (element) => {
-           // Ignore interactive elements during capture to clean up image
            if (element.tagName === 'BUTTON' || element.getAttribute('data-html2canvas-ignore')) {
              return true;
            }
            return false;
         },
-        onclone: (clonedDoc) => {
-           // Ensure background pattern visibility in clone
-           const element = clonedDoc.querySelector('.bg-islamic-pattern');
-           if (element instanceof HTMLElement) {
-              element.style.opacity = '1';
-           }
-        }
       });
       
       return new Promise((resolve) => {
@@ -157,45 +145,49 @@ const App: React.FC = () => {
     return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   };
 
+  const copyToClipboard = async (text: string) => {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (err) {
+        // Fallback or ignore
+        return false;
+    }
+  };
+
   const handleDownload = async () => {
     if (isCapturing) return;
     setIsCapturing(true);
 
     try {
       const blob = await generateCardImage();
-      
-      if (!blob) {
-         throw new Error("Failed to generate image");
-      }
+      if (!blob) throw new Error("Failed to generate image");
 
       if (isMobileDevice() && navigator.canShare) {
-        // --- MOBILE SAVE FIX ---
-        // On iOS, we use the Share Sheet. The user must tap "Save Image" from the sheet.
-        const file = new File([blob], `ihsan-card-${Date.now()}.png`, { type: 'image/png' });
+        // --- MOBILE (IOS/ANDROID) ---
+        // Create file
+        const file = new File([blob], `ihsan-card.png`, { type: 'image/png' });
         
-        try {
-           if (navigator.canShare({ files: [file] })) {
+        // Share ONLY the file. No title, no text.
+        // This forces the "Save Image" option to appear reliably in iOS Share Sheet.
+        if (navigator.canShare({ files: [file] })) {
              await navigator.share({
                files: [file],
              });
-             setShowToast({ visible: true, message: 'Saved via Share Sheet!' });
-           } else {
-             throw new Error("Device cannot share files");
-           }
-        } catch (e) {
-           console.log("Share sheet closed or failed", e);
-           // Fallback to legacy download (might work on Android, fails on iOS)
-           downloadBlob(blob);
+             setShowToast({ visible: true, message: 'Saved!' });
+        } else {
+             // Fallback if files not supported
+             downloadBlob(blob);
         }
       } else {
-        // --- DESKTOP SAVE ---
+        // --- DESKTOP ---
         downloadBlob(blob);
         setShowToast({ visible: true, message: 'Image Saved!' });
       }
-
     } catch (e) {
-      console.error(e);
-      alert("Save failed. Please try again.");
+      console.error("Save failed", e);
+      // Last resort fallback
+      alert("Could not save automatically. Please screenshot the card.");
     } finally {
       setIsCapturing(false);
     }
@@ -212,16 +204,6 @@ const App: React.FC = () => {
       URL.revokeObjectURL(url);
   };
 
-  const copyToClipboard = async (text: string) => {
-    try {
-        await navigator.clipboard.writeText(text);
-        return true;
-    } catch (err) {
-        console.warn('Clipboard API failed, trying legacy', err);
-        return false;
-    }
-  };
-
   const handleWhatsAppShare = async () => {
     if (isCapturing) return;
     setIsCapturing(true);
@@ -230,36 +212,29 @@ const App: React.FC = () => {
     const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
     
     try {
-      // 1. Generate Image
+      // 1. Copy text to clipboard immediately
+      await copyToClipboard(shareText);
+      
+      // 2. Generate Image
       const blob = await generateCardImage();
       if (!blob) throw new Error("Image generation failed");
 
       const file = new File([blob], `ihsan-reminder.png`, { type: 'image/png' });
 
-      // 2. Auto-Copy Text First (Crucial for iOS)
-      await copyToClipboard(shareText);
-      setShowToast({ visible: true, message: 'Caption copied! Paste in WhatsApp.' });
-
-      // Wait a moment for the toast to be readable
-      await new Promise(resolve => setTimeout(resolve, 500));
-
+      // 3. Share Logic
       if (isMobileDevice() && navigator.canShare && navigator.canShare({ files: [file] })) {
-        // --- MOBILE FLOW (IOS/ANDROID) ---
-        // We strictly share ONLY the file here. 
-        // Trying to share { files, text } simultaneously causes iOS to strip the text
-        // or crash the share sheet entirely. We rely on the Clipboard copy above.
-        try {
-            await navigator.share({
-                files: [file]
-                // Notice: No 'text' or 'url' here. Just the file.
-            });
-        } catch (e) {
-            console.error("Share failed", e);
-        }
+        // MOBILE: Share FILE ONLY. 
+        // We do NOT attach text here to avoid iOS conflicts.
+        // User relies on the clipboard copy from step 1.
+        setShowToast({ visible: true, message: 'Caption copied! Select WhatsApp.' });
+        
+        await navigator.share({
+            files: [file] 
+        });
       } else {
-        // --- DESKTOP FLOW ---
+        // DESKTOP: Download + Open Web
         downloadBlob(blob);
-        setShowToast({ visible: true, message: 'Image saved! Attach to WhatsApp.' });
+        setShowToast({ visible: true, message: 'Image saved! Text copied.' });
         
         const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
         setTimeout(() => {
@@ -269,7 +244,10 @@ const App: React.FC = () => {
 
     } catch (err) {
       console.error("Share failed", err);
-      alert("Sharing failed. Please try saving the image instead.");
+      // Fallback
+      setShowToast({ visible: true, message: 'Share failed. Image saved.' });
+      const blob = await generateCardImage();
+      if(blob) downloadBlob(blob);
     } finally {
       setIsCapturing(false);
     }

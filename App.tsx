@@ -148,51 +148,53 @@ const App: React.FC = () => {
     }
   };
 
-  const isMobileDevice = () => {
-    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  };
+const isiOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
+const isAndroid = () => /Android/i.test(navigator.userAgent);
+const isMobileDevice = () => isiOS() || isAndroid();
 
-  const handleDownload = async () => {
-    if (isCapturing) return;
-    setIsCapturing(true);
 
-    try {
-      const blob = await generateCardImage();
-      
-      if (!blob) {
-         throw new Error("Failed to generate image");
+const handleDownload = async () => {
+  if (isCapturing) return;
+  setIsCapturing(true);
+
+  try {
+    const blob = await generateCardImage();
+    if (!blob) throw new Error("Failed to generate image");
+
+    const file = new File([blob], `ihsan-card-${Date.now()}.png`, { type: 'image/png' });
+
+    // ---- iOS FIX ----
+    if (isiOS() && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] }); // iOS only allows files
+        setShowToast({ visible: true, message: "Image shared — tap 'Save Image'." });
+        return;
+      } catch (err) {
+        console.log("iOS ShareSheet failed, fallback unavailable:", err);
+        alert("On iPhone, please tap 'Save Image' from the Share Sheet.");
+        return;
       }
-
-      if (isMobileDevice() && navigator.canShare) {
-        // --- MOBILE SAVE FIX ---
-        // On iOS/Android, "Download" via <a> tag is unreliable.
-        // Instead, we use the Share Sheet which allows "Save Image".
-        const file = new File([blob], `ihsan-card-${Date.now()}.png`, { type: 'image/png' });
-        
-        try {
-           await navigator.share({
-             files: [file],
-           });
-           setShowToast({ visible: true, message: 'Saved via Share Sheet!' });
-        } catch (e) {
-           // Fallback if user cancels share or device doesn't support file sharing
-           console.log("Share sheet closed or failed", e);
-           // Try legacy download as backup
-           downloadBlob(blob);
-        }
-      } else {
-        // --- DESKTOP SAVE ---
-        downloadBlob(blob);
-        setShowToast({ visible: true, message: 'Image Saved!' });
-      }
-
-    } catch (e) {
-      console.error(e);
-      alert("Save failed. Please try again.");
-    } finally {
-      setIsCapturing(false);
     }
-  };
+
+    // ---- Android / Desktop ----
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      setShowToast({ visible: true, message: "Image shared successfully!" });
+      return;
+    }
+
+    // ---- Desktop Fallback ----
+    downloadBlob(blob);
+    setShowToast({ visible: true, message: "Image saved!" });
+
+  } catch (err) {
+    console.error(err);
+    alert("Save failed. Please try again.");
+  } finally {
+    setIsCapturing(false);
+  }
+};
+
 
   const downloadBlob = (blob: Blob) => {
       const url = URL.createObjectURL(blob);
@@ -215,68 +217,74 @@ const App: React.FC = () => {
     }
   };
 
-  const handleWhatsAppShare = async () => {
-    if (isCapturing) return;
-    setIsCapturing(true);
+const handleWhatsAppShare = async () => {
+  if (isCapturing) return;
+  setIsCapturing(true);
 
-    const appUrl = window.location.href;
-    const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
-    
-    try {
-      // 1. Generate Image
-      const blob = await generateCardImage();
-      if (!blob) throw new Error("Image generation failed");
+  const appUrl = window.location.href;
+  const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
 
-      const file = new File([blob], `ihsan-reminder.png`, { type: 'image/png' });
+  try {
+    const blob = await generateCardImage();
+    if (!blob) throw new Error("Image generation failed");
 
-      // 2. Universal Step: Copy Caption to Clipboard
-      // This is crucial because iOS often strips caption in Share Sheet
-      await copyToClipboard(shareText);
-      
-      const canNativeShare = navigator.canShare && navigator.canShare({ files: [file] });
+    const file = new File([blob], `ihsan-reminder.png`, { type: "image/png" });
 
-      if (isMobileDevice() && canNativeShare) {
-        // --- MOBILE FLOW ---
-        setShowToast({ visible: true, message: 'Caption copied! Paste if missing.' });
-        
-        setTimeout(async () => {
-            try {
-                // Try sharing WITH text first
-                await navigator.share({
-                    files: [file],
-                    text: shareText, 
-                });
-            } catch (e) {
-                console.log("Full share failed, retrying image only", e);
-                try {
-                  // Fallback: Share ONLY image (iOS sometimes requires this)
-                  // We rely on the clipboard copy for the text
-                  await navigator.share({
-                      files: [file]
-                  });
-                } catch (retryErr) {
-                  console.error("Retry failed", retryErr);
-                }
-            }
-        }, 300);
-      } else {
-        // --- DESKTOP FLOW ---
-        downloadBlob(blob);
-        setShowToast({ visible: true, message: 'Image saved! Attach to WhatsApp.' });
-        
-        const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-        setTimeout(() => {
-            window.open(whatsappUrl, '_blank');
-        }, 1000);
+    // ALWAYS copy caption for safety (Android & iOS)
+    await copyToClipboard(shareText);
+
+    // --------------------------
+    // iOS BEHAVIOR (very strict)
+    // --------------------------
+    if (isiOS() && navigator.canShare && navigator.canShare({ files: [file] })) {
+      setShowToast({ visible: true, message: "Caption copied — paste inside WhatsApp." });
+
+      try {
+        // iOS DOES NOT ALLOW text + image to WhatsApp
+        await navigator.share({ files: [file] });
+      } catch (err) {
+        console.log("iOS share attempt failed:", err);
       }
 
-    } catch (err) {
-      console.error("Share failed", err);
-      alert("Sharing failed. Please try saving the image instead.");
-    } finally {
-      setIsCapturing(false);
+      return;
     }
-  };
+
+    // --------------------------
+    // ANDROID BEHAVIOR (supports image + text)
+    // --------------------------
+    const canAndroidShare =
+      isAndroid() &&
+      navigator.canShare &&
+      navigator.canShare({ files: [file], text: shareText });
+
+    if (canAndroidShare) {
+      await navigator.share({
+        files: [file],
+        text: shareText,
+      });
+      return;
+    }
+
+    // --------------------------
+    // DESKTOP FALLBACK (Web WhatsApp)
+    // --------------------------
+    downloadBlob(blob);
+    setShowToast({
+      visible: true,
+      message: "Image saved — caption copied. Paste it in WhatsApp Web.",
+    });
+
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+    setTimeout(() => window.open(whatsappUrl, "_blank"), 600);
+
+  } catch (err) {
+    console.error("Share failed", err);
+    alert("Sharing failed. Please try again.");
+  } finally {
+    setIsCapturing(false);
+  }
+};
+
 
   // Logic for List Modal
   const getListItems = () => {

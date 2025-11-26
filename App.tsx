@@ -115,11 +115,16 @@ const App: React.FC = () => {
     await new Promise(resolve => setTimeout(resolve, 100));
     
     try {
+      // Dynamic scale: High DPI screens (iPhone) crash with scale 3 or 4.
+      // We cap it at 2 which is sufficient for Retina displays.
+      const pixelRatio = window.devicePixelRatio || 1;
+      const safeScale = pixelRatio > 2 ? 2 : pixelRatio;
+
       const canvas = await html2canvas(cardRef.current, {
         backgroundColor: '#0F2027', // Dark background for no transparency
-        scale: 2, // Balanced for Mobile Safari
+        scale: safeScale,
         useCORS: true,
-        allowTaint: true,
+        allowTaint: false, // CRITICAL FIX FOR IOS: Must be FALSE
         logging: false,
         ignoreElements: (element) => {
            // Ignore interactive elements during capture to clean up image
@@ -148,53 +153,53 @@ const App: React.FC = () => {
     }
   };
 
-const isiOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
-const isAndroid = () => /Android/i.test(navigator.userAgent);
-const isMobileDevice = () => isiOS() || isAndroid();
+  const isMobileDevice = () => {
+    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  };
 
+  const handleDownload = async () => {
+    if (isCapturing) return;
+    setIsCapturing(true);
 
-const handleDownload = async () => {
-  if (isCapturing) return;
-  setIsCapturing(true);
-
-  try {
-    const blob = await generateCardImage();
-    if (!blob) throw new Error("Failed to generate image");
-
-    const file = new File([blob], `ihsan-card-${Date.now()}.png`, { type: 'image/png' });
-
-    // ---- iOS FIX ----
-    if (isiOS() && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file] }); // iOS only allows files
-        setShowToast({ visible: true, message: "Image shared — tap 'Save Image'." });
-        return;
-      } catch (err) {
-        console.log("iOS ShareSheet failed, fallback unavailable:", err);
-        alert("On iPhone, please tap 'Save Image' from the Share Sheet.");
-        return;
+    try {
+      const blob = await generateCardImage();
+      
+      if (!blob) {
+         throw new Error("Failed to generate image");
       }
+
+      if (isMobileDevice() && navigator.canShare) {
+        // --- MOBILE SAVE FIX ---
+        // On iOS, we use the Share Sheet. The user must tap "Save Image" from the sheet.
+        const file = new File([blob], `ihsan-card-${Date.now()}.png`, { type: 'image/png' });
+        
+        try {
+           if (navigator.canShare({ files: [file] })) {
+             await navigator.share({
+               files: [file],
+             });
+             setShowToast({ visible: true, message: 'Saved via Share Sheet!' });
+           } else {
+             throw new Error("Device cannot share files");
+           }
+        } catch (e) {
+           console.log("Share sheet closed or failed", e);
+           // Fallback to legacy download (might work on Android, fails on iOS)
+           downloadBlob(blob);
+        }
+      } else {
+        // --- DESKTOP SAVE ---
+        downloadBlob(blob);
+        setShowToast({ visible: true, message: 'Image Saved!' });
+      }
+
+    } catch (e) {
+      console.error(e);
+      alert("Save failed. Please try again.");
+    } finally {
+      setIsCapturing(false);
     }
-
-    // ---- Android / Desktop ----
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file] });
-      setShowToast({ visible: true, message: "Image shared successfully!" });
-      return;
-    }
-
-    // ---- Desktop Fallback ----
-    downloadBlob(blob);
-    setShowToast({ visible: true, message: "Image saved!" });
-
-  } catch (err) {
-    console.error(err);
-    alert("Save failed. Please try again.");
-  } finally {
-    setIsCapturing(false);
-  }
-};
-
+  };
 
   const downloadBlob = (blob: Blob) => {
       const url = URL.createObjectURL(blob);
@@ -217,74 +222,58 @@ const handleDownload = async () => {
     }
   };
 
-const handleWhatsAppShare = async () => {
-  if (isCapturing) return;
-  setIsCapturing(true);
+  const handleWhatsAppShare = async () => {
+    if (isCapturing) return;
+    setIsCapturing(true);
 
-  const appUrl = window.location.href;
-  const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
+    const appUrl = window.location.href;
+    const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
+    
+    try {
+      // 1. Generate Image
+      const blob = await generateCardImage();
+      if (!blob) throw new Error("Image generation failed");
 
-  try {
-    const blob = await generateCardImage();
-    if (!blob) throw new Error("Image generation failed");
+      const file = new File([blob], `ihsan-reminder.png`, { type: 'image/png' });
 
-    const file = new File([blob], `ihsan-reminder.png`, { type: "image/png" });
+      // 2. Auto-Copy Text First (Crucial for iOS)
+      await copyToClipboard(shareText);
+      setShowToast({ visible: true, message: 'Caption copied! Paste in WhatsApp.' });
 
-    // ALWAYS copy caption for safety (Android & iOS)
-    await copyToClipboard(shareText);
+      // Wait a moment for the toast to be readable
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-    // --------------------------
-    // iOS BEHAVIOR (very strict)
-    // --------------------------
-    if (isiOS() && navigator.canShare && navigator.canShare({ files: [file] })) {
-      setShowToast({ visible: true, message: "Caption copied — paste inside WhatsApp." });
-
-      try {
-        // iOS DOES NOT ALLOW text + image to WhatsApp
-        await navigator.share({ files: [file] });
-      } catch (err) {
-        console.log("iOS share attempt failed:", err);
+      if (isMobileDevice() && navigator.canShare && navigator.canShare({ files: [file] })) {
+        // --- MOBILE FLOW (IOS/ANDROID) ---
+        // We strictly share ONLY the file here. 
+        // Trying to share { files, text } simultaneously causes iOS to strip the text
+        // or crash the share sheet entirely. We rely on the Clipboard copy above.
+        try {
+            await navigator.share({
+                files: [file]
+                // Notice: No 'text' or 'url' here. Just the file.
+            });
+        } catch (e) {
+            console.error("Share failed", e);
+        }
+      } else {
+        // --- DESKTOP FLOW ---
+        downloadBlob(blob);
+        setShowToast({ visible: true, message: 'Image saved! Attach to WhatsApp.' });
+        
+        const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+        setTimeout(() => {
+            window.open(whatsappUrl, '_blank');
+        }, 1000);
       }
 
-      return;
+    } catch (err) {
+      console.error("Share failed", err);
+      alert("Sharing failed. Please try saving the image instead.");
+    } finally {
+      setIsCapturing(false);
     }
-
-    // --------------------------
-    // ANDROID BEHAVIOR (supports image + text)
-    // --------------------------
-    const canAndroidShare =
-      isAndroid() &&
-      navigator.canShare &&
-      navigator.canShare({ files: [file], text: shareText });
-
-    if (canAndroidShare) {
-      await navigator.share({
-        files: [file],
-        text: shareText,
-      });
-      return;
-    }
-
-    // --------------------------
-    // DESKTOP FALLBACK (Web WhatsApp)
-    // --------------------------
-    downloadBlob(blob);
-    setShowToast({
-      visible: true,
-      message: "Image saved — caption copied. Paste it in WhatsApp Web.",
-    });
-
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
-    setTimeout(() => window.open(whatsappUrl, "_blank"), 600);
-
-  } catch (err) {
-    console.error("Share failed", err);
-    alert("Sharing failed. Please try again.");
-  } finally {
-    setIsCapturing(false);
-  }
-};
-
+  };
 
   // Logic for List Modal
   const getListItems = () => {

@@ -41,10 +41,12 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
   return (
     <div
       ref={ref}
-      className={`relative w-full max-w-xl mx-auto overflow-hidden rounded-3xl border border-white/10 p-1 shadow-2xl backdrop-blur-2xl transition-all duration-500 ${className}`}
+      className={`relative w-full max-w-xl mx-auto overflow-hidden rounded-3xl border border-white/10 shadow-2xl backdrop-blur-2xl transition-all duration-500 ${className}`}
+      // Increased padding to 16px to create a safe capture zone
+      style={{ padding: '16px' }}
     >
       {/* Inner Border Container for Premium Feel */}
-      <div className="relative h-full w-full rounded-2xl border border-amber-200/20 bg-gradient-to-b from-white/10 to-emerald-900/40 p-6 md:p-8 shadow-inner min-h-[500px] flex flex-col justify-center">
+      <div className="relative h-full w-full rounded-2xl border border-amber-200/20 bg-gradient-to-b from-white/10 to-emerald-900/40 p-6 md:p-8 shadow-inner min-h-[500px] flex flex-col justify-center overflow-hidden">
         
         {/* Subtle Islamic Geometric Pattern Overlay */}
         <div className="absolute inset-0 z-0 bg-islamic-pattern opacity-100 pointer-events-none"></div>
@@ -57,42 +59,42 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
         <div className="relative z-10 flex flex-col items-center w-full">
           
           {/* Header Icon */}
-          <div className="mb-4 md:mb-6 flex justify-center text-amber-100/70 relative w-full">
+          <div className="mb-4 md:mb-6 flex justify-center items-center text-amber-100/70 relative w-full">
             {isNameOfAllah ? (
-               <div className="flex flex-col items-center">
+               <div className="flex flex-col items-center justify-center w-full relative">
                  <Sparkles size={32} className="text-amber-200 animate-pulse" />
-                 {/* Optional Button to open List inside the card (rendered only if prop provided) */}
+                 {/* Optional Button to open List inside the card */}
                  {onViewList && (
                    <button 
                      onClick={onViewList} 
                      className="absolute right-0 top-0 flex items-center gap-1 text-[10px] bg-white/10 px-2 py-1 rounded-full text-emerald-200 hover:bg-white/20 transition-colors"
-                     data-html2canvas-ignore="true" // Don't include this button in screenshot
+                     data-html2canvas-ignore="true" 
                    >
                      <List size={12} /> View All
                    </button>
                  )}
                </div>
             ) : (
-              <div className="flex items-center">
-                <Sparkles size={24} strokeWidth={1.5} className="mr-2 opacity-60" />
-                <Quote size={32} className="opacity-90" />
-                <Sparkles size={24} strokeWidth={1.5} className="ml-2 opacity-60" />
+              <div className="flex items-center justify-center w-full">
+                <Sparkles size={24} strokeWidth={1.5} className="mr-2 opacity-60 flex-shrink-0" />
+                <Quote size={32} className="opacity-90 flex-shrink-0" />
+                <Sparkles size={24} strokeWidth={1.5} className="ml-2 opacity-60 flex-shrink-0" />
               </div>
             )}
           </div>
 
-          {/* Type Badge */}
+          {/* Type Badge - Added whitespace-nowrap and z-index to prevent clipping */}
           {!isNameOfAllah && (
-            <span className="mb-4 inline-flex items-center rounded-full border border-amber-200/20 bg-emerald-950/30 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-200/80 shadow-sm backdrop-blur-sm">
+            <span className="relative z-20 mb-4 inline-flex items-center rounded-full border border-amber-200/20 bg-emerald-950/40 px-6 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-200/90 shadow-sm backdrop-blur-md whitespace-nowrap mx-auto">
               {content.type}
             </span>
           )}
 
           {/* Arabic Text Section */}
-          <div className="mb-8 w-full text-center relative group" dir="rtl">
+          <div className="mb-6 w-full text-center relative group" dir="rtl">
             {/* 
-                CRITICAL FIX: 
-                Reduced line-height from 4 to 2.9 to close the gap between lines while still preventing collision.
+                Arabic Text 
+                Line height reduced to 2.9 for perfect spacing.
             */}
             <p 
               className={`font-arabic font-bold text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.3)] 
@@ -104,7 +106,7 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
               {content.arabicText}
             </p>
             
-            {/* Audio Button - Only for Quran or items with audioUrl */}
+            {/* Audio Button */}
             {content.audioUrl && (
               <div className="absolute -left-2 top-1/2 -translate-y-1/2 md:-left-4" dir="ltr">
                 <button 
@@ -171,7 +173,7 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
           
           {/* Watermark */}
           <div className="mt-6 flex items-center justify-center opacity-70">
-            <p className="text-[9px] uppercase tracking-[0.3em] text-white font-light">
+            <p className="text-[9px] uppercase tracking-[0.3em] text-white font-light whitespace-nowrap">
               Ihsan App | Daily Reminder
             </p>
           </div>

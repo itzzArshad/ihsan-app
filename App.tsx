@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import html2canvas from 'html2canvas';
-import { RefreshCw, Download, Share2, Loader2, Info, MessageCircle, Moon, Heart, Compass, Search, Grid, X } from 'lucide-react';
+import { RefreshCw, Download, Share2, Loader2, Info, MessageCircle, Moon, Heart, Compass, Search, Grid, X, Check, Copy } from 'lucide-react';
 import ReminderCard from './components/ReminderCard';
 import { MOCK_CONTENT, fetchRandomQuranVerse, fetchRandomHadith, getContentByType, getDuasByTag } from './services/contentService';
 import { ContentItem, ContentType } from './types';
@@ -23,14 +23,14 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ContentType>(ContentType.QURAN);
   const [selectedFeeling, setSelectedFeeling] = useState<string>('All');
   
-  // Initialize with a placeholder or fetch immediately
+  // Initialize with a placeholder
   const [currentContent, setCurrentContent] = useState<ContentItem>(() => {
-    // Return a temporary loading placeholder or mock dua just to render something
     return MOCK_CONTENT[0]; 
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [showToast, setShowToast] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
   
   // State for 99 Names List View
   const [isListOpen, setIsListOpen] = useState<boolean>(false);
@@ -43,16 +43,24 @@ const App: React.FC = () => {
      handleNewReflection(ContentType.QURAN, false);
   }, []);
 
+  // Toast Timer
+  useEffect(() => {
+    if (showToast.visible) {
+      const timer = setTimeout(() => {
+        setShowToast({ ...showToast, visible: false });
+      }, 4000); // Increased duration to ensure user sees it
+      return () => clearTimeout(timer);
+    }
+  }, [showToast.visible]);
+
   // Reset feeling when leaving Dua tab
   useEffect(() => {
     if (activeTab !== ContentType.DUA) {
       setSelectedFeeling('All');
     }
-    // Refresh content logic on tab change
     handleNewReflection(activeTab, true);
   }, [activeTab]);
 
-  // Handle feeling change logic
   useEffect(() => {
     if (activeTab === ContentType.DUA) {
       handleNewReflection(ContentType.DUA, true);
@@ -65,21 +73,14 @@ const App: React.FC = () => {
     setIsLoading(true);
     
     try {
-        // Logic for Quran: API
         if (typeToFetch === ContentType.QURAN) {
             const newContent = await fetchRandomQuranVerse();
-            if (newContent) {
-                setCurrentContent(newContent);
-            }
+            if (newContent) setCurrentContent(newContent);
         }
-        // Logic for Hadith: API
         else if (typeToFetch === ContentType.HADITH) {
             const newContent = await fetchRandomHadith();
-            if (newContent) {
-                setCurrentContent(newContent);
-            }
+            if (newContent) setCurrentContent(newContent);
         }
-        // Logic for DUA and NAMES: Local Mock
         else {
             let pool: ContentItem[] = [];
             if (typeToFetch === ContentType.DUA && selectedFeeling !== 'All') {
@@ -90,14 +91,9 @@ const App: React.FC = () => {
             }
 
             if (pool.length > 0) {
-                let nextItem;
-                // Simple random selection
-                if (pool.length > 1) {
-                    // Try to pick different one if possible, but for large datasets standard random is fine
-                    nextItem = pool[Math.floor(Math.random() * pool.length)];
-                } else {
-                    nextItem = pool[0];
-                }
+                const nextItem = pool.length > 1 
+                    ? pool[Math.floor(Math.random() * pool.length)]
+                    : pool[0];
                 setCurrentContent(nextItem);
             }
         }
@@ -109,19 +105,25 @@ const App: React.FC = () => {
   }, [activeTab, selectedFeeling]);
 
 
-  // Helper to generate blob from card
   const generateCardImage = async (): Promise<Blob | null> => {
     if (!cardRef.current) return null;
     
-    // Allow React to render any pending updates before capture
+    // Slight delay to ensure DOM is stable
     await new Promise(resolve => setTimeout(resolve, 50));
     
     try {
       const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: '#0F2027', // Fix: Dark background matches app theme, removing transparency issues
-        scale: 3, // High resolution
+        backgroundColor: '#0F2027', // Dark background for no transparency
+        scale: 2, // Scale 2 is safer for mobile Safari RAM limits while maintaining quality
         useCORS: true,
         logging: false,
+        onclone: (clonedDoc) => {
+           // Ensure background pattern visibility in clone
+           const element = clonedDoc.querySelector('.bg-islamic-pattern');
+           if (element instanceof HTMLElement) {
+              element.style.opacity = '1';
+           }
+        }
       });
       
       return new Promise((resolve) => {
@@ -139,9 +141,27 @@ const App: React.FC = () => {
     if (isCapturing) return;
     setIsCapturing(true);
 
-    const blob = await generateCardImage();
-    
-    if (blob) {
+    try {
+      const blob = await generateCardImage();
+      
+      if (blob) {
+         // STRICT DOWNLOAD: No navigator.share here.
+         // This ensures the "Save" button behaves consistently as a download/save action
+         // rather than opening the App Selection/Share Sheet.
+         downloadBlob(blob);
+         setShowToast({ visible: true, message: 'Image Saved!' });
+      } else {
+        alert("Could not generate image. Please try again.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Save failed.");
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const downloadBlob = (blob: Blob) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -150,49 +170,74 @@ const App: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-    } else {
-      alert("Could not generate image. Please try again.");
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (err) {
+        console.warn('Clipboard API failed, trying legacy', err);
+        return false;
     }
-    
-    setIsCapturing(false);
   };
 
   const handleWhatsAppShare = async () => {
     if (isCapturing) return;
     setIsCapturing(true);
 
-    const appUrl = window.location.href;
+    const appUrl = window.location.href; // Changes dynamically based on where app is running
     const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
     
     try {
+      // 1. Generate Image
       const blob = await generateCardImage();
-      
-      // Attempt Native Share (Works on Mobile for WhatsApp with Image)
-      if (blob && navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], 'reminder.png', { type: 'image/png' })] })) {
-        const file = new File([blob], `ihsan-reminder.png`, { type: 'image/png' });
-        await navigator.share({
-          files: [file],
-          title: 'Ihsan Islamic Reminder',
-          text: shareText,
-        });
-      } else {
-        // Fallback: Desktop or non-supporting browser
-        if (blob) {
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `ihsan-reminder.png`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
+      if (!blob) throw new Error("Image generation failed");
 
-        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
-        window.open(whatsappUrl, '_blank');
-        alert("Opening WhatsApp... The image has been saved to your device. Please attach it manually.");
+      const file = new File([blob], `ihsan-reminder.png`, { type: 'image/png' });
+
+      // 2. ALWAYS Copy Text to Clipboard (Universal Fallback for Caption)
+      await copyToClipboard(shareText);
+      setShowToast({ visible: true, message: 'Caption copied! Paste in WhatsApp' });
+      
+      // 3. Determine Sharing Method
+      const canNativeShare = navigator.canShare && navigator.canShare({ files: [file] });
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile && canNativeShare) {
+        // --- MOBILE FLOW ---
+        // Opens the Native Share Sheet. User selects WhatsApp.
+        // We rely on the clipboard copy above for the caption if WhatsApp ignores the 'text' field.
+        
+        // Short delay to ensure clipboard operation finishes and UI updates
+        setTimeout(async () => {
+            try {
+                await navigator.share({
+                    files: [file],
+                    text: shareText, 
+                });
+            } catch (e) {
+                console.log("Share cancelled or failed", e);
+            }
+        }, 500);
+      } else {
+        // --- DESKTOP FLOW ---
+        // Browser cannot paste image into WhatsApp Web automatically.
+        // Flow: Download Image -> Open WA Web -> User attaches image.
+        
+        downloadBlob(blob);
+        
+        // Open WhatsApp Web with text pre-filled
+        const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+        
+        setTimeout(() => {
+            window.open(whatsappUrl, '_blank');
+        }, 1000);
       }
+
     } catch (err) {
       console.error("Share failed", err);
+      alert("Sharing failed. Please try downloading the image manually.");
     } finally {
       setIsCapturing(false);
     }
@@ -210,6 +255,14 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen w-full bg-[#0F2027] bg-gradient-to-br from-[#0F2027] via-[#203A43] to-[#2C5364] flex flex-col items-center justify-center p-4 md:p-8 font-sans text-slate-100 relative overflow-hidden">
       
+      {/* Toast Notification */}
+      <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-500 ${showToast.visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+        <div className="bg-emerald-500/90 text-white px-6 py-3 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-2 border border-emerald-400/50">
+            <Check size={18} strokeWidth={3} />
+            <span className="font-medium text-sm">{showToast.message}</span>
+        </div>
+      </div>
+
       {/* Background Ambience */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
          <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[80%] h-[50%] bg-emerald-900/20 rounded-full blur-[120px]"></div>

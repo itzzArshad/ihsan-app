@@ -411,7 +411,7 @@ const App: React.FC = () => {
            
            <div className="flex flex-col items-center gap-1">
              <a href="#" className="text-sm font-medium text-emerald-200/70 hover:text-emerald-200 transition-colors tracking-wide">
-               www.ihsan-app.com
+               https://ihsan-app-five.vercel.app/
              </a>
              <p className="text-[10px] uppercase tracking-widest text-white/20">
                Built by Arshad

@@ -108,15 +108,26 @@ const App: React.FC = () => {
   const generateCardImage = async (): Promise<Blob | null> => {
     if (!cardRef.current) return null;
     
+    // Ensure fonts are loaded before capture
+    await document.fonts.ready;
+    
     // Slight delay to ensure DOM is stable
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     try {
       const canvas = await html2canvas(cardRef.current, {
         backgroundColor: '#0F2027', // Dark background for no transparency
-        scale: 2, // Scale 2 is safer for mobile Safari RAM limits while maintaining quality
+        scale: 2, // Balanced for Mobile Safari
         useCORS: true,
+        allowTaint: true,
         logging: false,
+        ignoreElements: (element) => {
+           // Ignore interactive elements during capture to clean up image
+           if (element.tagName === 'BUTTON' || element.getAttribute('data-html2canvas-ignore')) {
+             return true;
+           }
+           return false;
+        },
         onclone: (clonedDoc) => {
            // Ensure background pattern visibility in clone
            const element = clonedDoc.querySelector('.bg-islamic-pattern');
@@ -137,6 +148,10 @@ const App: React.FC = () => {
     }
   };
 
+  const isMobileDevice = () => {
+    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  };
+
   const handleDownload = async () => {
     if (isCapturing) return;
     setIsCapturing(true);
@@ -144,18 +159,36 @@ const App: React.FC = () => {
     try {
       const blob = await generateCardImage();
       
-      if (blob) {
-         // STRICT DOWNLOAD: No navigator.share here.
-         // This ensures the "Save" button behaves consistently as a download/save action
-         // rather than opening the App Selection/Share Sheet.
-         downloadBlob(blob);
-         setShowToast({ visible: true, message: 'Image Saved!' });
-      } else {
-        alert("Could not generate image. Please try again.");
+      if (!blob) {
+         throw new Error("Failed to generate image");
       }
+
+      if (isMobileDevice() && navigator.canShare) {
+        // --- MOBILE SAVE FIX ---
+        // On iOS/Android, "Download" via <a> tag is unreliable.
+        // Instead, we use the Share Sheet which allows "Save Image".
+        const file = new File([blob], `ihsan-card-${Date.now()}.png`, { type: 'image/png' });
+        
+        try {
+           await navigator.share({
+             files: [file],
+           });
+           setShowToast({ visible: true, message: 'Saved via Share Sheet!' });
+        } catch (e) {
+           // Fallback if user cancels share or device doesn't support file sharing
+           console.log("Share sheet closed or failed", e);
+           // Try legacy download as backup
+           downloadBlob(blob);
+        }
+      } else {
+        // --- DESKTOP SAVE ---
+        downloadBlob(blob);
+        setShowToast({ visible: true, message: 'Image Saved!' });
+      }
+
     } catch (e) {
       console.error(e);
-      alert("Save failed.");
+      alert("Save failed. Please try again.");
     } finally {
       setIsCapturing(false);
     }
@@ -186,7 +219,7 @@ const App: React.FC = () => {
     if (isCapturing) return;
     setIsCapturing(true);
 
-    const appUrl = window.location.href; // Changes dynamically based on where app is running
+    const appUrl = window.location.href;
     const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${currentContent.reference}\n\nRead more at: ${appUrl}`;
     
     try {
@@ -196,40 +229,42 @@ const App: React.FC = () => {
 
       const file = new File([blob], `ihsan-reminder.png`, { type: 'image/png' });
 
-      // 2. ALWAYS Copy Text to Clipboard (Universal Fallback for Caption)
+      // 2. Universal Step: Copy Caption to Clipboard
+      // This is crucial because iOS often strips caption in Share Sheet
       await copyToClipboard(shareText);
-      setShowToast({ visible: true, message: 'Caption copied! Paste in WhatsApp' });
       
-      // 3. Determine Sharing Method
       const canNativeShare = navigator.canShare && navigator.canShare({ files: [file] });
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-      if (isMobile && canNativeShare) {
+      if (isMobileDevice() && canNativeShare) {
         // --- MOBILE FLOW ---
-        // Opens the Native Share Sheet. User selects WhatsApp.
-        // We rely on the clipboard copy above for the caption if WhatsApp ignores the 'text' field.
+        setShowToast({ visible: true, message: 'Caption copied! Paste if missing.' });
         
-        // Short delay to ensure clipboard operation finishes and UI updates
         setTimeout(async () => {
             try {
+                // Try sharing WITH text first
                 await navigator.share({
                     files: [file],
                     text: shareText, 
                 });
             } catch (e) {
-                console.log("Share cancelled or failed", e);
+                console.log("Full share failed, retrying image only", e);
+                try {
+                  // Fallback: Share ONLY image (iOS sometimes requires this)
+                  // We rely on the clipboard copy for the text
+                  await navigator.share({
+                      files: [file]
+                  });
+                } catch (retryErr) {
+                  console.error("Retry failed", retryErr);
+                }
             }
-        }, 500);
+        }, 300);
       } else {
         // --- DESKTOP FLOW ---
-        // Browser cannot paste image into WhatsApp Web automatically.
-        // Flow: Download Image -> Open WA Web -> User attaches image.
-        
         downloadBlob(blob);
+        setShowToast({ visible: true, message: 'Image saved! Attach to WhatsApp.' });
         
-        // Open WhatsApp Web with text pre-filled
         const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-        
         setTimeout(() => {
             window.open(whatsappUrl, '_blank');
         }, 1000);
@@ -237,7 +272,7 @@ const App: React.FC = () => {
 
     } catch (err) {
       console.error("Share failed", err);
-      alert("Sharing failed. Please try downloading the image manually.");
+      alert("Sharing failed. Please try saving the image instead.");
     } finally {
       setIsCapturing(false);
     }
@@ -411,7 +446,7 @@ const App: React.FC = () => {
            
            <div className="flex flex-col items-center gap-1">
              <a href="#" className="text-sm font-medium text-emerald-200/70 hover:text-emerald-200 transition-colors tracking-wide">
-               https://ihsan-app-five.vercel.app/
+               www.ihsan-app.com
              </a>
              <p className="text-[10px] uppercase tracking-widest text-white/20">
                Built by Arshad

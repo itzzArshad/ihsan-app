@@ -205,7 +205,7 @@ const App: React.FC = () => {
              
              // iOS Fallback: Open in new window
              const url = URL.createObjectURL(blob);
-             window.open(url, '_blank');
+             window.location.href = url; // Redirect to image blob so user can long-press save
              setShowToast({ visible: true, message: 'Long press image to save' });
          }
       }
@@ -224,15 +224,23 @@ const App: React.FC = () => {
     setIsCapturing(true);
     setShowToast({ visible: true, message: 'Preparing...' });
 
+    // Prepare content variables
+    const appUrl = window.location.href;
+    const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\nRead more at: ${appUrl}`;
+    
+    // Fallback function for iOS
+    const doIOSFallback = () => {
+        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+        // Use location.href instead of window.open to bypass popup blockers on iOS
+        window.location.href = whatsappUrl;
+        setShowToast({ visible: true, message: 'Opening WhatsApp...' });
+    };
+
     try {
-      // 1. Prepare Text
-      const appUrl = window.location.href;
-      const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\nRead more at: ${appUrl}`;
-      
-      // 2. Copy to Clipboard (Background) - Essential for when Image Share drops text
+      // 1. Copy to Clipboard (Background) - Essential for when Image Share drops text
       copyToClipboard(shareText); 
 
-      // 3. Generate Image
+      // 2. Generate Image
       const blob = await generateCardImage();
       if (!blob) throw new Error("Image generation failed");
       const fileName = `ihsan-share-${Date.now()}.png`;
@@ -281,15 +289,12 @@ const App: React.FC = () => {
                  if (err.name === 'AbortError') return;
 
                  // FALLBACK: Redirect to WhatsApp with Text/Link
-                 // User requested: "if image share doesnt work, redirect with link and text"
-                 const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
-                 window.open(whatsappUrl, '_blank');
-                 setShowToast({ visible: true, message: 'Opening WhatsApp...' });
+                 console.log("Image share failed on iOS, redirecting to text fallback");
+                 doIOSFallback();
              }
          } else {
              // No share support -> Text Fallback
-             const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
-             window.open(whatsappUrl, '_blank');
+             doIOSFallback();
          }
       }
       // --- DESKTOP LOGIC ---
@@ -305,10 +310,13 @@ const App: React.FC = () => {
 
     } catch (err: any) {
       console.error("Share process error", err);
-      // Last resort fallback
-      const appUrl = window.location.href;
-      const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${appUrl}`;
-      window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank');
+      // Global Last resort fallback (e.g. image generation failed)
+      if (isIOS()) {
+         doIOSFallback();
+      } else {
+         const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+         window.open(whatsappUrl, '_blank');
+      }
     } finally {
       setIsCapturing(false);
     }

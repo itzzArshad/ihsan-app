@@ -125,16 +125,16 @@ const App: React.FC = () => {
       await document.fonts.ready;
       
       // Fixed scale for mobile to ensure speed and prevent memory crashes
+      // iOS 26 (Future proofing/Current iOS 17+) handles canvases better but limit to 2 for safety
       const scale = isMobileDevice() ? 2 : 2.5;
 
       const canvas = await html2canvas(cardRef.current, {
         backgroundColor: '#0F2027', 
         scale: scale,
         useCORS: true,
-        allowTaint: false, // Must be false for iOS
+        allowTaint: false, // Must be false for iOS security
         logging: false,
         ignoreElements: (element) => {
-           // Ignore buttons to keep the image clean
            if (element.tagName === 'BUTTON' || element.getAttribute('data-html2canvas-ignore')) {
              return true;
            }
@@ -184,33 +184,35 @@ const App: React.FC = () => {
       const fileName = `ihsan-card-${Date.now()}.png`;
       const file = new File([blob], fileName, { type: 'image/png' });
 
-      // 1. iOS: Must use Share Sheet to "Save Image"
-      if (isIOS()) {
+      // 1. Android & Desktop: Direct Download
+      // Android users expect "Save" to just download the file, not open a share sheet
+      if (isAndroid() || !isMobileDevice()) {
+         downloadBlob(blob, fileName);
+         setShowToast({ visible: true, message: 'Downloaded!' });
+      }
+      // 2. iOS: Share Sheet (Tap "Save Image")
+      // iOS blocks direct downloads via <a> tags often, so we use Share Sheet
+      else if (isIOS()) {
          try {
              if (navigator.share) {
                 await navigator.share({ files: [file] });
                 setShowToast({ visible: true, message: 'Saved!' });
              } else {
-                throw new Error("Share not supported");
+                throw new Error("Share unsupported");
              }
          } catch (e: any) {
              if (e.name === 'AbortError') return;
              
-             // iOS Fallback: Open in new window for manual save
+             // iOS Fallback: Open in new window
              const url = URL.createObjectURL(blob);
              window.open(url, '_blank');
              setShowToast({ visible: true, message: 'Long press image to save' });
          }
-      } 
-      // 2. Android & Desktop: Direct Download (Better UX for Android)
-      else {
-         downloadBlob(blob, fileName);
-         setShowToast({ visible: true, message: 'Downloaded!' });
       }
 
     } catch (e) {
       console.error("Save failed", e);
-      alert("Could not save automatically. Please screenshot.");
+      alert("Could not save. Please take a screenshot.");
     } finally {
       setIsCapturing(false);
     }
@@ -225,56 +227,75 @@ const App: React.FC = () => {
     try {
       // 1. Prepare Text
       const appUrl = window.location.href;
-      const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${appUrl}`;
+      const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\nRead more at: ${appUrl}`;
       
-      // 2. Copy to Clipboard (Background)
+      // 2. Copy to Clipboard (Background) - Essential for when Image Share drops text
       copyToClipboard(shareText); 
 
       // 3. Generate Image
       const blob = await generateCardImage();
       if (!blob) throw new Error("Image generation failed");
       const fileName = `ihsan-share-${Date.now()}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
 
-      // 4. Mobile Share Flow
-      if (isMobileDevice()) {
-         const file = new File([blob], fileName, { type: 'image/png' });
-         
+      // --- ANDROID LOGIC ---
+      if (isAndroid()) {
+         // Android: We MUST try to share the image.
          if (navigator.share) {
             try {
-                // Try sharing Text + File (Best case)
-                await navigator.share({
-                    files: [file],
-                    title: 'Ihsan Reminder',
-                    text: shareText
-                });
-                setShowToast({ visible: true, message: 'Shared!' });
+               // Try sharing everything (Image + Text)
+               await navigator.share({
+                  files: [file],
+                  title: 'Ihsan Reminder',
+                  text: shareText
+               });
+               setShowToast({ visible: true, message: 'Shared!' });
             } catch (err: any) {
-                if (err.name === 'AbortError') return;
-
-                // Fallback: Try sharing FILE ONLY (Fixes many iOS/Android bugs)
-                try {
-                    await navigator.share({
-                        files: [file]
-                    });
-                    setShowToast({ visible: true, message: 'Caption copied! Paste it.' });
-                } catch (retryErr: any) {
-                    if (retryErr.name === 'AbortError') return;
-                    
-                    // Final Fallback: Download
-                    downloadBlob(blob, fileName);
-                    alert("Sharing failed. Image downloaded.");
-                }
+               if (err.name === 'AbortError') return; // User cancelled
+               
+               // Fallback: Share Image Only (if Text+Image failed)
+               try {
+                  await navigator.share({ files: [file] });
+                  setShowToast({ visible: true, message: 'Caption copied! Paste in WhatsApp.' });
+               } catch (e) {
+                  // If everything fails, download content
+                  downloadBlob(blob, fileName);
+                  alert("Sharing failed on device. Image downloaded.");
+               }
             }
          } else {
-            // Navigator.share not supported (e.g. HTTP on Android)
-            downloadBlob(blob, fileName);
-            alert("Sharing requires HTTPS. Image downloaded instead.");
+             // If navigator.share is missing (e.g. HTTP)
+             downloadBlob(blob, fileName);
+             alert("Sharing requires HTTPS. Image downloaded.");
          }
       } 
-      // 5. Desktop Flow
+      // --- IOS LOGIC ---
+      else if (isIOS()) {
+         // iOS: Try sharing Image. If it fails, fallback to Text Link.
+         if (navigator.share) {
+             try {
+                 // Try sharing Image Only (Safest for iOS stability)
+                 await navigator.share({ files: [file] });
+                 setShowToast({ visible: true, message: 'Caption copied!' });
+             } catch (err: any) {
+                 if (err.name === 'AbortError') return;
+
+                 // FALLBACK: Redirect to WhatsApp with Text/Link
+                 // User requested: "if image share doesnt work, redirect with link and text"
+                 const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+                 window.open(whatsappUrl, '_blank');
+                 setShowToast({ visible: true, message: 'Opening WhatsApp...' });
+             }
+         } else {
+             // No share support -> Text Fallback
+             const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+             window.open(whatsappUrl, '_blank');
+         }
+      }
+      // --- DESKTOP LOGIC ---
       else {
         downloadBlob(blob, fileName);
-        setShowToast({ visible: true, message: 'Image saved! Text copied.' });
+        setShowToast({ visible: true, message: 'Image saved! Opening WhatsApp...' });
         
         const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
         setTimeout(() => {
@@ -284,7 +305,10 @@ const App: React.FC = () => {
 
     } catch (err: any) {
       console.error("Share process error", err);
-      alert(`Error: ${err.message}`);
+      // Last resort fallback
+      const appUrl = window.location.href;
+      const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\n${appUrl}`;
+      window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank');
     } finally {
       setIsCapturing(false);
     }

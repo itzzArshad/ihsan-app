@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import * as htmlToImage from 'html-to-image';
+import html2canvas from 'html2canvas';
 import { RefreshCw, Download, Share2, Loader2, Info, MessageCircle, Moon, Heart, Compass, Search, Grid, X, Check, Copy } from 'lucide-react';
 import ReminderCard from './components/ReminderCard';
 import { MOCK_CONTENT, fetchRandomQuranVerse, fetchRandomHadith, getContentByType, getDuasByTag } from './services/contentService';
 import { ContentItem, ContentType } from './types';
-
-// Access the global variable from the CDN script
-const domtoimage = (window as any).domtoimage;
 
 // Enhanced Feelings Data with Emojis
 const FEELINGS_DATA = [
@@ -119,35 +118,56 @@ const App: React.FC = () => {
     return isIOS() || isAndroid();
   };
 
-  // New Generation Logic using dom-to-image-more
-  const generateCardImage = async (): Promise<Blob | null> => {
-    if (!cardRef.current || !domtoimage) return null;
+  /**
+   * HYBRID GENERATION STRATEGY
+   * iOS: Uses html-to-image (SVG foreignObject) - Robust against Safari canvas bugs
+   * Android: Uses html2canvas (Canvas API) - Requested by user, works well on Chrome/Android
+   */
+  const generateCardImage = async (returnType: 'blob' | 'dataUrl' = 'blob'): Promise<Blob | string | null> => {
+    if (!cardRef.current) return null;
     
-    try {
-      await document.fonts.ready;
-      
-      const node = cardRef.current;
-      const scale = isMobileDevice() ? 2 : 3;
-      
-      const config = {
-          width: node.offsetWidth * scale,
-          height: node.offsetHeight * scale,
-          style: {
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-            width: `${node.offsetWidth}px`,
-            height: `${node.offsetHeight}px`
-          },
-          bgcolor: '#0F2027', // Fix transparency
-          copyDefaultStyles: false
-      };
+    // Wait for fonts to avoid layout shifts
+    await document.fonts.ready;
 
-      const blob = await domtoimage.toBlob(node, config);
-      return blob;
+    try {
+      if (isIOS()) {
+        // --- IOS STRATEGY (html-to-image) ---
+        const options = {
+            backgroundColor: '#0F2027', // Match bg
+            pixelRatio: 2, // Safe limit for iOS memory
+            cacheBust: true,
+            filter: (node: HTMLElement) => !node.hasAttribute?.('data-html2canvas-ignore')
+        };
+        
+        if (returnType === 'dataUrl') {
+            return await htmlToImage.toPng(cardRef.current, options);
+        } else {
+            return await htmlToImage.toBlob(cardRef.current, options);
+        }
+
+      } else {
+        // --- ANDROID/DESKTOP STRATEGY (html2canvas) ---
+        const canvas = await html2canvas(cardRef.current, {
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#0F2027',
+            scale: 3, // High Quality for Android
+            ignoreElements: (element) => element.hasAttribute('data-html2canvas-ignore')
+        });
+
+        if (returnType === 'dataUrl') {
+            return canvas.toDataURL('image/png');
+        } else {
+            return new Promise((resolve) => {
+                canvas.toBlob((blob) => resolve(blob), 'image/png');
+            });
+        }
+      }
     } catch (err) {
-      console.error("DOM-to-Image generation failed", err);
-      // Fallback or retry?
-      throw err;
+      console.error("Image generation failed", err);
+      // Fallback alert for debugging on mobile
+      alert("Generation failed: " + (err instanceof Error ? err.message : String(err)));
+      return null;
     }
   };
 
@@ -175,39 +195,43 @@ const App: React.FC = () => {
     setShowToast({ visible: true, message: 'Generating...' });
 
     try {
-      const blob = await generateCardImage();
-      if (!blob) throw new Error("Failed to generate image");
-
-      const fileName = `ihsan-card-${Date.now()}.png`;
-      const file = new File([blob], fileName, { type: 'image/png' });
-
-      // 1. Android & Desktop: Direct Download
-      if (isAndroid() || !isMobileDevice()) {
+      // ANDROID / DESKTOP -> Direct Download
+      if (!isIOS()) {
+         const blob = await generateCardImage('blob') as Blob;
+         if (!blob) throw new Error("Generation failed");
+         
+         const fileName = `ihsan-card-${Date.now()}.png`;
          downloadBlob(blob, fileName);
          setShowToast({ visible: true, message: 'Downloaded!' });
       }
-      // 2. iOS: Share Sheet (Tap "Save Image")
-      else if (isIOS()) {
-         try {
-             if (navigator.share) {
-                await navigator.share({ files: [file] });
-                setShowToast({ visible: true, message: 'Saved!' });
-             } else {
-                throw new Error("Share unsupported");
-             }
-         } catch (e: any) {
-             if (e.name === 'AbortError') return;
-             
-             // iOS Fallback: Open in new window for manual save
-             const url = URL.createObjectURL(blob);
-             window.location.href = url; 
-             setShowToast({ visible: true, message: 'Long press image to save' });
+      // IOS -> New Tab Strategy (Best for saving)
+      else {
+         const dataUrl = await generateCardImage('dataUrl') as string;
+         if (!dataUrl) throw new Error("Generation failed");
+
+         // Try to open new tab
+         const win = window.open();
+         if (win) {
+             win.document.write(`
+                <html>
+                   <head><title>Long Press to Save</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+                   <body style="margin:0; background:#0F2027; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh;">
+                      <img src="${dataUrl}" style="max-width:90%; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.5);" />
+                      <div style="margin-top:20px; color:white; font-family:system-ui; background:rgba(255,255,255,0.2); padding:10px 20px; border-radius:20px; backdrop-filter:blur(10px);">
+                         Long Press Image to Save 📸
+                      </div>
+                   </body>
+                </html>
+             `);
+             setShowToast({ visible: true, message: 'Image Ready' });
+         } else {
+             // Fallback if popup blocked: Redirect current tab
+             window.location.href = dataUrl;
+             setShowToast({ visible: true, message: 'Long Press to Save' });
          }
       }
-
     } catch (e: any) {
       console.error("Save failed", e);
-      alert(`Save Failed: ${e.message || "Unknown error"}`);
     } finally {
       setIsCapturing(false);
     }
@@ -222,20 +246,18 @@ const App: React.FC = () => {
     const appUrl = window.location.href;
     const shareText = `*Daily Islamic Reminder via Ihsan App*\n\n"${currentContent.englishTranslation}"\n\nRead more at: ${appUrl}`;
     
-    // Fallback function for iOS
-    const doIOSFallback = () => {
-        // Use location.href instead of window.open for iOS reliability
+    // Fallback: Redirect to WhatsApp with Text Link
+    const doTextFallback = () => {
         const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
         window.location.href = whatsappUrl;
-        setShowToast({ visible: true, message: 'Opening WhatsApp...' });
     };
 
     try {
-      // 1. Copy to Clipboard (Non-blocking)
+      // 1. Copy text quietly
       copyToClipboard(shareText); 
 
       // 2. Generate Image
-      const blob = await generateCardImage();
+      const blob = await generateCardImage('blob') as Blob;
       if (!blob) throw new Error("Image generation failed");
       
       const fileName = `ihsan-share-${Date.now()}.png`;
@@ -253,44 +275,43 @@ const App: React.FC = () => {
                });
                setShowToast({ visible: true, message: 'Shared!' });
             } catch (err: any) {
-               if (err.name === 'AbortError') return; 
+               if (err.name === 'AbortError') return;
                
                // Retry Image Only
                try {
                   await navigator.share({ files: [file] });
-                  setShowToast({ visible: true, message: 'Caption copied! Paste in WhatsApp.' });
-               } catch (e: any) {
-                  alert("Sharing failed: " + e.message);
-                  downloadBlob(blob, fileName);
+               } catch (e) {
+                   // Final fail: Download
+                   downloadBlob(blob, fileName);
+                   alert("Share failed. Image downloaded.");
                }
             }
          } else {
+             // HTTP or unsupported
              downloadBlob(blob, fileName);
-             alert("Sharing requires HTTPS. Image downloaded.");
+             alert("Sharing unavailable. Downloaded instead.");
          }
       } 
       // --- IOS LOGIC ---
       else if (isIOS()) {
+         // Attempt Native Share (Image Only) - Risky on iOS but better than nothing
          if (navigator.share) {
              try {
-                 // Try Image Only (Most reliable on iOS)
                  await navigator.share({ files: [file] });
-                 setShowToast({ visible: true, message: 'Caption copied!' });
+                 setShowToast({ visible: true, message: 'Paste caption in chat!' });
              } catch (err: any) {
                  if (err.name === 'AbortError') return;
-
-                 // FALLBACK: Redirect to WhatsApp with Text/Link if image share fails
-                 console.log("Image share failed on iOS, redirecting to text fallback");
-                 doIOSFallback();
+                 // If image share fails, fallback to Text Link
+                 doTextFallback();
              }
          } else {
-             doIOSFallback();
+             doTextFallback();
          }
       }
       // --- DESKTOP LOGIC ---
       else {
         downloadBlob(blob, fileName);
-        setShowToast({ visible: true, message: 'Image saved! Opening WhatsApp...' });
+        setShowToast({ visible: true, message: 'Image saved!' });
         
         const whatsappUrl = `https://web.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
         setTimeout(() => {
@@ -300,12 +321,8 @@ const App: React.FC = () => {
 
     } catch (err: any) {
       console.error("Share process error", err);
-      // Global Last resort fallback for iOS
-      if (isIOS()) {
-         doIOSFallback();
-      } else {
-         alert("Error: " + err.message);
-      }
+      // Safety net: Always redirect to WhatsApp text if image fails
+      doTextFallback();
     } finally {
       setIsCapturing(false);
     }

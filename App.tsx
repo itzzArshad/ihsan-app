@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as htmlToImage from 'html-to-image';
 import html2canvas from 'html2canvas';
+import { Analytics } from '@vercel/analytics/react';
 import { RefreshCw, Download, Share2, Loader2, Info, MessageCircle, Moon, Heart, Compass, Search, Grid, X, Check, Copy } from 'lucide-react';
 import ReminderCard from './components/ReminderCard';
 import { MOCK_CONTENT, fetchRandomQuranVerse, fetchRandomHadith, getContentByType, getDuasByTag } from './services/contentService';
@@ -339,7 +340,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen w-full bg-[#0F2027] bg-gradient-to-br from-[#0F2027] via-[#203A43] to-[#2C5364] flex flex-col items-center justify-center p-4 md:p-8 font-sans text-slate-100 relative overflow-hidden">
-      
+            <Analytics />
       {/* Toast Notification */}
       <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-500 ${showToast.visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
         <div className="bg-emerald-500/90 text-white px-6 py-3 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-2 border border-emerald-400/50">

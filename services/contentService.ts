@@ -1,5 +1,6 @@
 
 import { ContentItem, ContentType, AdhkarItem } from '../types';
+import { ADHKAR_DATA } from './adhkarData';
 
 // --- 99 NAMES DATA (FULL LIST) ---
 const NAMES_DATA = [
@@ -233,32 +234,26 @@ export const fetchRandomHadith = async (): Promise<ContentItem | null> => {
 
 // --- ADHKAR (Fetched from JSON) ---
 export const fetchAdhkarFromApi = async (time: 'Morning' | 'Evening'): Promise<AdhkarItem[]> => {
-    try {
-        const response = await fetch('/en.json');
-        if (!response.ok) {
-           console.error("Failed to fetch en.json");
-           return [];
-        }
-        const data = await response.json();
-        
-        // 0 = Both, 1 = Morning, 2 = Evening
-        const targetType = time === 'Morning' ? 1 : 2;
-        
-        return data.filter((item: any) => item.type === 0 || item.type === targetType).map((item: any) => ({
-            id: `adhkar-${item.order}`,
-            type: ContentType.ADHKAR,
-            time: time,
-            targetCount: item.count || 1,
-            arabicText: item.content,
-            englishTranslation: item.translation,
-            urduTranslation: "", // Not available in this dataset
-            transliteration: item.transliteration,
-            reference: item.source,
-            benefit: item.fadl,
-            audioUrl: item.audio
-        }));
-    } catch (error) {
-        console.error("Error parsing Adhkar data", error);
-        return [];
-    }
+    // Return data immediately without fetch
+    // 0 = Both, 1 = Morning, 2 = Evening
+    const targetType = time === 'Morning' ? 1 : 2;
+    
+    // Simulate async if needed, but not strictly necessary. 
+    // Keeping function signature async is good for compatibility.
+    
+    const filtered = ADHKAR_DATA.filter((item: any) => item.type === 0 || item.type === targetType).map((item: any) => ({
+        id: `adhkar-${item.order}`,
+        type: ContentType.ADHKAR,
+        time: time,
+        targetCount: item.count || 1,
+        arabicText: item.content,
+        englishTranslation: item.translation,
+        urduTranslation: "", // Not available in this dataset
+        transliteration: item.transliteration,
+        reference: item.source,
+        benefit: item.fadl,
+        audioUrl: item.audio
+    }));
+
+    return Promise.resolve(filtered);
 };

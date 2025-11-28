@@ -1,16 +1,22 @@
+
 import React, { forwardRef, useState, useRef, useEffect } from 'react';
 import { ContentItem, ContentType } from '../types';
-import { Quote, Sparkles, Play, Pause, List } from 'lucide-react';
+import { Quote, Sparkles, Play, Pause, List, Heart } from 'lucide-react';
 
 interface ReminderCardProps {
   content: ContentItem;
   className?: string;
   onViewList?: () => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: (item: ContentItem) => void;
 }
 
-const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, className, onViewList }, ref) => {
+const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, className, onViewList, isFavorite, onToggleFavorite }, ref) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // Local animation state for heart click
+  const [heartAnim, setHeartAnim] = useState(false);
 
   // Reset audio state when content changes
   useEffect(() => {
@@ -35,6 +41,14 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
   const handleAudioEnded = () => {
     setIsPlaying(false);
   };
+  
+  const handleFavoriteClick = () => {
+     if (onToggleFavorite) {
+        setHeartAnim(true);
+        setTimeout(() => setHeartAnim(false), 300);
+        onToggleFavorite(content);
+     }
+  };
 
   const isNameOfAllah = content.type === ContentType.NAMES_OF_ALLAH;
 
@@ -42,8 +56,8 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
     <div
       ref={ref}
       className={`relative w-full max-w-xl mx-auto overflow-hidden rounded-3xl border border-white/10 shadow-2xl backdrop-blur-2xl transition-all duration-500 ${className}`}
-      // Increased padding to 16px to create a safe capture zone
       style={{ padding: '16px' }}
+      id="card-capture-area"
     >
       {/* Inner Border Container for Premium Feel */}
       <div className="relative h-full w-full rounded-2xl border border-amber-200/20 bg-gradient-to-b from-white/10 to-emerald-900/40 p-6 md:p-8 shadow-inner min-h-[500px] flex flex-col justify-center overflow-hidden">
@@ -54,26 +68,30 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
         {/* Decorative Gradients */}
         <div className="absolute -top-24 -left-24 h-56 w-56 rounded-full bg-emerald-400/20 blur-[80px]"></div>
         <div className="absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-amber-200/10 blur-[80px]"></div>
+        
+        {/* ACTION BUTTONS (TOP RIGHT) */}
+        <div className="absolute top-4 right-4 z-30 flex gap-2">
+           {/* Favorite Button */}
+           <button 
+             onClick={handleFavoriteClick}
+             data-html2canvas-ignore="true"
+             className={`p-2.5 rounded-full backdrop-blur-md border transition-all duration-300 group ${
+                isFavorite 
+                ? 'bg-red-500/20 border-red-500/40 text-red-400' 
+                : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-red-400'
+             } ${heartAnim ? 'scale-125' : 'scale-100'}`}
+           >
+              <Heart size={18} fill={isFavorite ? "currentColor" : "none"} className={isFavorite ? "drop-shadow-[0_0_8px_rgba(248,113,113,0.6)]" : ""} />
+           </button>
+        </div>
 
         {/* Content Container */}
         <div className="relative z-10 flex flex-col items-center w-full">
           
           {/* Header Icon */}
-          <div className="mb-4 md:mb-6 flex justify-center items-center text-amber-100/70 relative w-full">
+          <div className="mb-4 md:mb-6 flex flex-col items-center justify-center text-amber-100/70 relative w-full gap-3">
             {isNameOfAllah ? (
-               <div className="flex flex-col items-center justify-center w-full relative">
                  <Sparkles size={32} className="text-amber-200 animate-pulse" />
-                 {/* Optional Button to open List inside the card */}
-                 {onViewList && (
-                   <button 
-                     onClick={onViewList} 
-                     className="absolute right-0 top-0 flex items-center gap-1 text-[10px] bg-white/10 px-2 py-1 rounded-full text-emerald-200 hover:bg-white/20 transition-colors"
-                     data-html2canvas-ignore="true" 
-                   >
-                     <List size={12} /> View All
-                   </button>
-                 )}
-               </div>
             ) : (
               <div className="flex items-center justify-center w-full">
                 <Sparkles size={24} strokeWidth={1.5} className="mr-2 opacity-60 flex-shrink-0" />
@@ -83,7 +101,7 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
             )}
           </div>
 
-          {/* Type Badge - Added whitespace-nowrap and z-index to prevent clipping */}
+          {/* Type Badge */}
           {!isNameOfAllah && (
             <span className="relative z-20 mb-4 inline-flex items-center rounded-full border border-amber-200/20 bg-emerald-950/40 px-6 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-200/90 shadow-sm backdrop-blur-md whitespace-nowrap mx-auto">
               {content.type}
@@ -92,16 +110,12 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
 
           {/* Arabic Text Section */}
           <div className="mb-6 w-full text-center relative group" dir="rtl">
-            {/* 
-                Arabic Text 
-                Line height reduced to 2.9 for perfect spacing.
-            */}
             <p 
               className={`font-arabic font-bold text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.3)] 
               ${isNameOfAllah 
                 ? 'text-6xl md:text-7xl py-6 text-amber-100' 
                 : 'text-2xl md:text-4xl py-4'}`}
-              style={{ lineHeight: isNameOfAllah ? '2.2' : '2.9' }}
+              style={{ lineHeight: isNameOfAllah ? '2.2' : '2.9' }} 
             >
               {content.arabicText}
             </p>
@@ -145,7 +159,7 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
             </p>
           </div>
 
-          {/* Description (For Names of Allah or Context) */}
+          {/* Description */}
           {content.description && (
              <div className="mb-8 w-full text-center px-4 md:px-6 py-4 bg-emerald-950/20 rounded-xl border border-white/5">
                 <p className="text-sm text-emerald-100/80 leading-relaxed font-light tracking-wide">
@@ -168,6 +182,19 @@ const ReminderCard = forwardRef<HTMLDivElement, ReminderCardProps>(({ content, c
                   </span>
                 ))}
               </div>
+            )}
+            
+            {/* View List Button - MOVED HERE */}
+            {isNameOfAllah && onViewList && (
+               <div className="pt-2">
+                   <button 
+                     onClick={onViewList} 
+                     className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-semibold bg-white/5 px-3 py-1.5 rounded-full text-emerald-200/60 hover:text-emerald-200 hover:bg-white/10 transition-all border border-white/5"
+                     data-html2canvas-ignore="true" 
+                   >
+                     <List size={10} /> View All Names
+                   </button>
+               </div>
             )}
           </div>
           
